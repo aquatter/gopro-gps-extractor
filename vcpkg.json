@@ -1,0 +1,21 @@
+{
+  "dependencies": [
+    "eigen3",
+    "fmt",
+    "glfw3",
+    {
+      "name": "imgui",
+      "features": [
+        "dx11-binding",
+        "glfw-binding",
+        "opengl3-binding",
+        "win32-binding"
+      ]
+    },
+    "ng-log",
+    "nlohmann-json",
+    "range-v3",
+    "tinyxml2",
+    "boost-algorithm"
+  ]
+}

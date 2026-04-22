@@ -1,0 +1,145 @@
+#include <chrono>
+#include <fmt/color.h>
+#include <fmt/format.h>
+#include <mutex>
+#include <progress_bar.hpp>
+
+ProgressBar::ProgressBar(size_t message_count, const std::string_view tag)
+    : info_{ProgressInfo{.message_count_ = message_count,
+                         .processed_count_ = 0,
+                         .topic_name_ = tag.data(),
+                         .ind_ = 0}} {
+  max_name_size_ = info_.front().topic_name_.size();
+  max_count_size_ = fmt::format("{}", info_.front().message_count_).size();
+  topic_name_to_ind_[info_.front().topic_name_] = 0;
+}
+
+ProgressBar::ProgressBar(std::span<const ProgressInfo> topics)
+    : info_{topics.begin(), topics.end()} {
+
+  for (int i{0}; auto &&topic : topics) {
+    info_[i].ind_ = i;
+    info_[i].processed_count_ = 0;
+
+    max_name_size_ = std::max(max_name_size_, topic.topic_name_.size());
+    max_count_size_ = std::max(max_count_size_,
+                               fmt::format("{}", topic.message_count_).size());
+
+    topic_name_to_ind_[topic.topic_name_] = i;
+    ++i;
+  }
+}
+
+void ProgressBar::reset(size_t message_count, const std::string_view tag) {
+  topic_name_to_ind_.clear();
+  info_.clear();
+  info_.emplace_back(ProgressInfo{.message_count_ = message_count,
+                                  .processed_count_ = 0,
+                                  .topic_name_ = tag.data(),
+                                  .ind_ = 0});
+
+  max_name_size_ = info_.front().topic_name_.size();
+  max_count_size_ = fmt::format("{}", info_.front().message_count_).size();
+  topic_name_to_ind_[info_.front().topic_name_] = 0;
+}
+
+void ProgressBar::progress(const std::string &topic, size_t progress) {
+  if (not topic_name_to_ind_.contains(topic)) {
+    return;
+  }
+
+  auto &info{info_[topic_name_to_ind_[topic]]};
+  info.processed_count_ = progress;
+
+  advance(topic, 0);
+}
+
+void ProgressBar::advance(size_t how_much) {
+  std::lock_guard<std::mutex> lock{protector_};
+  advance(info_.front(), how_much);
+}
+
+void ProgressBar::advance(ProgressInfo &info, size_t how_much) {
+
+  info.processed_count_ += how_much;
+
+  const int progress{
+      std::min(static_cast<int>(static_cast<float>(length_) *
+                                static_cast<float>(info.processed_count_) /
+                                static_cast<float>(info.message_count_)),
+               length_)};
+
+  const int percents{std::min(
+      static_cast<int>(100.0f * static_cast<float>(info.processed_count_) /
+                           static_cast<float>(info.message_count_) +
+                       0.5f),
+      100)};
+
+  if (info.ind_ < curr_pos_) {
+    fmt::print("\e[{}F", curr_pos_ - info.ind_);
+  }
+
+  if (info.ind_ > curr_pos_) {
+    fmt::print("\e[{}E", info.ind_ - curr_pos_);
+  }
+
+  if (progress == length_) {
+    fmt::print("\e[38;2;154;205;50m{:<{}}\e[0m [\e[38;5;69m{:-^{}}\e[0m] "
+               "{:>{}}/{:>{}} \e[38;2;255;127;80m100%\e[0m\n",
+               info.topic_name_, max_name_size_, "-", length_,
+               info.processed_count_, max_count_size_, info.message_count_,
+               max_count_size_);
+  } else if (progress == 0) {
+    fmt::print("\e[38;2;154;205;50m{:<{}}\e[0m [{:^{}}] "
+               "{:>{}}/{:>{}} \e[38;2;255;127;80m{:>3}%\e[0m\n",
+               info.topic_name_, max_name_size_, " ", length_,
+               info.processed_count_, max_count_size_, info.message_count_,
+               max_count_size_, percents);
+  } else {
+    fmt::print("\e[38;2;154;205;50m{:<{}}\e[0m [\e[38;5;69m{:-^{}}\e[0m{:^{}}] "
+               "{:>{}}/{:>{}} \e[38;2;255;127;80m{:>3}%\e[0m\n",
+               info.topic_name_, max_name_size_, "-", progress, " ",
+               length_ - progress, info.processed_count_, max_count_size_,
+               info.message_count_, max_count_size_, percents);
+  }
+
+  curr_pos_ = info.ind_ + 1;
+}
+
+void ProgressBar::advance(const std::string &topic, size_t how_much) {
+
+  if (not topic_name_to_ind_.contains(topic)) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock{protector_};
+
+  auto &info{info_[topic_name_to_ind_[topic]]};
+  advance(info, how_much);
+}
+
+void ProgressBar::done() {
+  std::lock_guard<std::mutex> lock{protector_};
+  fmt::print("\e[{}E", static_cast<int>(info_.size()) - curr_pos_);
+  const double time_elapsed{
+      1.0e-9 *
+      static_cast<double>(
+          (std::chrono::high_resolution_clock::now() - start_time_).count())};
+
+  fmt::print("\e[38;5;84mDone in:\e[0m\e[38;5;208m {:.3f}\e[0m\e[38;5;84m "
+             "seconds\e[0m\n",
+             time_elapsed);
+}
+
+void ProgressBar::draw() {
+  for (auto &&info : info_) {
+    fmt::print("\e[38;5;84m{:<{}}\e[0m [{:^{}}] {:>{}}/{:>{}}   "
+               "\e[38;5;208m0%\e[0m\n",
+               info.topic_name_, max_name_size_, " ", length_,
+               info.processed_count_, max_count_size_, info.message_count_,
+               max_count_size_);
+  }
+
+  curr_pos_ = static_cast<int>(info_.size());
+  start_time_ = std::chrono::high_resolution_clock::now();
+}
