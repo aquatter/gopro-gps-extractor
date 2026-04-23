@@ -117,8 +117,7 @@ struct GPSChunk : GPMFChunkBase {
     double fix_;
   };
 
-  explicit GPSChunk(
-      std::span<const std::pair<int64_t, int64_t>> exclusion_intervals);
+  GPSChunk() = default;
 
   std::span<const std::string_view> four_cc() const override {
     return fourcc_str_;
@@ -139,19 +138,16 @@ struct GPSChunk : GPMFChunkBase {
     return std::nullopt;
   }
 
-  void reset() override;
-
   std::pair<int64_t, int64_t> timestamp_range() const override {
     return {measurements_.front().timestamp_, measurements_.back().timestamp_};
   }
 
-  bool exclude(int64_t timestamp) const noexcept;
+  void reset() override;
 
   static constexpr size_t num_components_{9};
   static constexpr std::array<std::string_view, 1> fourcc_str_{"GPS9"};
   std::vector<Data> data_;
   std::vector<Measurement> measurements_;
-  std::vector<std::pair<int64_t, int64_t>> exclusion_intervals_;
 };
 
 struct IMUChunk : GPMFChunkBase {

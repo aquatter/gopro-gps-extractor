@@ -1,7 +1,6 @@
 // clang-format off
 #include <algorithm>
 #include <boost/algorithm/string/case_conv.hpp>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -15,7 +14,6 @@
 #include <gpmf_parser.hpp>
 #include <limits>
 #include <memory>
-#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <stdexcept>
 // clang-format on
@@ -29,7 +27,6 @@
 #include <fstream>
 #include <gpmf_frame.hpp>
 #include <nlohmann/json.hpp>
-#include <progress_bar.hpp>
 #include <queue>
 #include <range/v3/action/push_back.hpp>
 #include <range/v3/algorithm/sort.hpp>
@@ -38,11 +35,6 @@
 #include <range/v3/view/transform.hpp>
 #include <range/v3/view/zip.hpp>
 #include <regex>
-#include <rosbag2_cpp/writer.hpp>
-#include <sensor_msgs/msg/compressed_image.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/nav_sat_fix.hpp>
-#include <std_msgs/msg/header.hpp>
 #include <string>
 #include <string_view>
 #include <tinyxml2.h>
@@ -168,18 +160,13 @@ struct MP4Source {
                       path_to_mp4.data())};
     }
 
-    fmt::print("\e[38;2;154;205;50mSuccessfully opened file:\e[0m "
-               "\e[38;2;255;127;80m{}\e[0m\n",
-               path_to_mp4.data());
+    fmt::print("Successfully opened file {}n", path_to_mp4.data());
 
     uint32_t fr_num{0}, fr_dem{0};
 
     num_frames_ = GetVideoFrameRateAndCount(mp4handle_, &fr_num, &fr_dem);
 
-    fmt::print("\e[38;2;154;205;50mVideo framerate:\e[0m "
-               "\e[38;2;255;127;80m{:.3f}\e[0m "
-               "\e[38;2;154;205;50mwith\e[0m \e[38;2;255;127;80m{}\e[0m "
-               "\e[38;2;154;205;50mframes\e[0m\n",
+    fmt::print("Video framerate: {:.3f} with {} frames\n",
                static_cast<float>(fr_num) / static_cast<float>(fr_dem),
                num_frames_);
 
@@ -274,18 +261,14 @@ struct GPMFParser::impl {
 
   impl(const GPMFParserSettings &set) : set_{set} {
 
-    if (not set_.gps_exclusion_intervals_.empty()) {
-      for (auto &&[start, end] : set_.gps_exclusion_intervals_) {
-        gps_exclusion_intervals_.push_back(
-            {1'000'000'000l * start, 1'000'000'000l * end});
-      }
-    }
-
     int rec_id{0};
-
     std::unordered_map<int, Record> rec{};
 
     for (auto &&input_path : set_.paths_to_mp4_) {
+
+      print(LogEntry::Severity::Info,
+            fmt::format("Examining path: {}", input_path));
+
       if (std::filesystem::file_type::directory ==
           std::filesystem::status(input_path).type()) {
 
@@ -347,82 +330,10 @@ struct GPMFParser::impl {
       records_.push_back(r);
     }
 
-    if (not set_.no_images_) {
-      chunks_.emplace_back(std::make_unique<SHUTChunk>(
-          SHUTChunkSettings{.resize_ = set_.resize_,
-                            .output_path_ = set_.output_path_,
-                            .jpeg_quality_ = set_.jpeg_quality_,
-                            .extract_images_ = set_.extract_images_,
-                            .compress_ = set_.compress_,
-                            .fix_distortion_ = set.fix_distortion_,
-                            .calibration_path_ = set.calibration_path_
+    print(LogEntry::Severity::Info,
+          fmt::format("Found {} records", records_.size()));
 
-          }));
-    }
-
-    if (not set_.no_gps_) {
-      chunks_.emplace_back(
-          std::make_unique<GPSChunk>(gps_exclusion_intervals_));
-    }
-    if (not set_.no_imu_) {
-      chunks_.emplace_back(std::make_unique<IMUChunk>());
-    }
-
-    start_time_ = 1'000'000'000l * set_.start_time_;
-    end_time_ = 1'000'000'000l * set_.end_time_;
-
-    start_time_ = start_time_ < 0 ? 0 : start_time_;
-    end_time_ = end_time_ < 0 ? std::numeric_limits<int64_t>::max() : end_time_;
-
-    load_intervals();
-  }
-
-  void load_intervals() {
-    if (not std::filesystem::exists(set_.path_to_exclusion_intervals_)) {
-      return;
-    }
-
-    std::ifstream f{set_.path_to_exclusion_intervals_};
-    nlohmann::json json = nlohmann::json::parse(f);
-
-    for (auto &&json_record : json["intervals"]) {
-
-      const auto record_id{json_record["record"].get<size_t>()};
-
-      for (auto &&json_interval : json_record["data"]) {
-        exclusion_intervals_map_[record_id].push_back(
-            {1'000'000'000l * static_cast<int64_t>(json_interval[0]),
-             1'000'000'000l * static_cast<int64_t>(json_interval[1])});
-      }
-    }
-  }
-
-  void set_intervals(size_t record_id) {
-    if (exclusion_intervals_map_.empty()) {
-      return;
-    }
-
-    if (not exclusion_intervals_map_.contains(record_id)) {
-      gps_exclusion_intervals_.clear();
-
-      for (auto &&chunk : chunks_) {
-        if (chunk->whoami() == ChunkType::GPS) {
-          static_cast<GPSChunk *>(chunk.get())->exclusion_intervals_.clear();
-          break;
-        }
-      }
-      return;
-    }
-
-    gps_exclusion_intervals_ = exclusion_intervals_map_.at(record_id);
-
-    for (auto &&chunk : chunks_) {
-      if (chunk->whoami() == ChunkType::GPS) {
-        static_cast<GPSChunk *>(chunk.get())->exclusion_intervals_ =
-            exclusion_intervals_map_.at(record_id);
-        break;
-      }
-    }
+    chunks_.emplace_back(std::make_unique<GPSChunk>());
   }
 
   void parse() {
@@ -430,29 +341,32 @@ struct GPMFParser::impl {
     int total_duration{0};
 
     for (auto &&record : records_) {
+
+      print(LogEntry::Severity::Info,
+            fmt::format("Processing record {}", record.id_));
+
       lla_.clear();
-      create_bag(fmt::format("{}record_{}", set_.output_path_, record.id_));
-      set_intervals(record.id_);
 
       int track_duration{0};
       bool record_failed{false};
 
       try {
-
         for (auto &&part : record.parts_) {
+
+          print(LogEntry::Severity::Info,
+                fmt::format("\tProcessing part {}", part.id_));
 
           MP4Source mp4{part.path_.string()};
 
           for (auto &&chunk : chunks_) {
             chunk->reset();
-            chunk->open_mp4(part.path_.string());
             chunk->set_frame_rate(mp4.frame_rate(chunk->four_cc()[0].data()));
           }
 
           track_duration += mp4.duration();
           mp4.parse(chunks_);
 
-          if (set_.save_geojson_) {
+          {
 
             for (auto &&chunk : chunks_) {
               chunk->visit([this](const GPMFChunkBase *chunk) {
@@ -480,145 +394,47 @@ struct GPMFParser::impl {
               });
             }
           }
-
-          if (set_.callback_) {
-            for (auto &&chunk : chunks_) {
-              chunk->visit(set_.callback_);
-            }
-          }
-
-          write_bag();
         }
 
       } catch (const std::exception &ex) {
-        fmt::print(fmt::fg(fmt::color::red), "{}\n", ex.what());
+        print(LogEntry::Severity::Error, ex.what());
         record_failed = true;
       }
-
-      close_bag();
 
       if (not record_failed) {
         total_duration += track_duration;
 
-        fmt::print("\e[38;2;154;205;50mTrack duration: \e[0m"
-                   "\e[38;2;255;127;80m{}\e[0m\e[38;2;154;205;50m hours \e[0m"
-                   "\e[38;2;255;127;80m{}\e[0m\e[38;2;154;205;50m minutes \e[0m"
-                   "\e[38;2;255;127;80m{}\e[0m\e[38;2;154;205;50m "
-                   "seconds\e[0m\n",
-                   track_duration / 3600, (track_duration % 3600) / 60,
-                   (track_duration % 3600) % 60);
+        print(LogEntry::Severity::Info,
+              fmt::format("Track duration: {} hours {} minutes {} seconds",
+                          track_duration / 3600, (track_duration % 3600) / 60,
+                          (track_duration % 3600) % 60));
 
-        write_geojson(
-            fmt::format("record_{}", record.id_),
-            fmt::format("{}record_{}.geojson", set_.output_path_, record.id_));
+        write_geojson(fmt::format("record_{}", record.id_),
+                      (std::filesystem::path{set_.output_path_} /
+                       fmt::format("record_{}.geojson", record.id_))
+                          .string());
 
-        write_gpx(
-            fmt::format("{}record_{}.gpx", set_.output_path_, record.id_));
+        write_gpx((std::filesystem::path{set_.output_path_} /
+                   fmt::format("record_{}.gpx", record.id_))
+                      .string());
 
         track_length();
       }
     }
 
-    if (set_.save_geojson_) {
-      fmt::print(
-          "\e[38;2;154;205;50mTotal GPS track length: \e[0m"
-          "\e[38;2;255;127;80m{:.3f}\e[0m\e[38;2;154;205;50m kilometers\e[0m\n",
-          1.0e-3 * track_length_);
-    }
+    print(LogEntry::Severity::Info,
+          fmt::format("Total GPS track length: {:.3f} kilometers",
+                      1.0e-3 * track_length_));
 
-    fmt::print("\e[38;2;154;205;50mTotal duration: \e[0m"
-               "\e[38;2;255;127;80m{}\e[0m\e[38;2;154;205;50m hours \e[0m"
-               "\e[38;2;255;127;80m{}\e[0m\e[38;2;154;205;50m minutes \e[0m"
-               "\e[38;2;255;127;80m{}\e[0m\e[38;2;154;205;50m "
-               "seconds\e[0m\n",
-               total_duration / 3600, (total_duration % 3600) / 60,
-               (total_duration % 3600) % 60);
-  }
+    print(LogEntry::Severity::Info,
+          fmt::format("Total duration: {} hours {} minutes {} seconds",
+                      total_duration / 3600, (total_duration % 3600) / 60,
+                      (total_duration % 3600) % 60));
 
-  void close_bag() {
-    if (not set_.save_bag_) {
-      return;
-    }
-
-    writer_.close();
-  }
-
-  void write_bag() {
-
-    if (not set_.save_bag_) {
-      return;
-    }
-
-    using queue_type = std::pair<int64_t, GPMFChunkBase *>;
-
-    std::priority_queue<queue_type, std::vector<queue_type>,
-                        decltype([](const queue_type &a, const queue_type &b) {
-                          return a.first > b.first;
-                        })>
-        q;
-
-    int64_t min_timestamp{std::numeric_limits<int64_t>::max()};
-    int64_t max_timestamp{std::numeric_limits<int64_t>::min()};
-
-    for (auto &&chunk : chunks_) {
-      if (chunk->timestamp().has_value()) {
-        q.emplace(chunk->timestamp().value(), chunk.get());
-      }
-
-      const auto [min_stamp, max_stamp] = chunk->timestamp_range();
-
-      min_timestamp = std::min(min_timestamp, min_stamp);
-      max_timestamp = std::max(max_timestamp, max_stamp);
-    }
-
-    ProgressBar bar{std::vector{ProgressBar::ProgressInfo{
-        .message_count_ = static_cast<size_t>(
-            1.0e-9 * static_cast<double>(max_timestamp - min_timestamp + 1) +
-            0.5),
-        .processed_count_ = 0,
-        .topic_name_ = "sec",
-        .ind_ = 0}}};
-
-    bar.draw();
-
-    int64_t curr_timestamp{min_timestamp};
-
-    while (not q.empty()) {
-      auto ptr{q.top().second};
-      q.pop();
-
-      if (ptr->timestamp().value() < start_time_) {
-        ptr->increment();
-      } else if (ptr->timestamp().value() > end_time_) {
-        continue;
-      } else {
-
-        ptr->write(writer_);
-      }
-
-      if (ptr->timestamp().has_value()) {
-        q.emplace(ptr->timestamp().value(), ptr);
-
-        const int64_t timestamp_diff{ptr->timestamp().value() - curr_timestamp};
-
-        if (timestamp_diff >= 1'000'000'000) {
-          bar.progress(
-              "sec", static_cast<size_t>(
-                         1.0e-9 * static_cast<double>(ptr->timestamp().value() -
-                                                      min_timestamp + 1) +
-                         0.5));
-          curr_timestamp = ptr->timestamp().value();
-        }
-      }
-    }
-
-    bar.done();
+    on_end();
   }
 
   void write_gpx(const std::string_view path) {
-    if (not set_.save_geojson_) {
-      return;
-    }
 
     tinyxml2::XMLDocument doc{};
 
@@ -657,10 +473,6 @@ struct GPMFParser::impl {
         continue;
       }
 
-      if (exclude(timestamp)) {
-        continue;
-      }
-
       auto trkpt{doc.NewElement("trkpt")};
       trkpt->SetAttribute("lat", gps.x());
       trkpt->SetAttribute("lon", gps.y());
@@ -676,12 +488,12 @@ struct GPMFParser::impl {
     }
 
     doc.SaveFile(path.data());
+
+    print(LogEntry::Severity::Info,
+          fmt::format("GPX written to {}", path.data()));
   }
 
   void track_length() {
-    if (not set_.save_geojson_) {
-      return;
-    }
 
     double current_length{0.0};
 
@@ -691,10 +503,6 @@ struct GPMFParser::impl {
            zip(lla_, gps_fix_, gps_timestamps_)) {
 
         if (fix != 3.0) {
-          continue;
-        }
-
-        if (exclude(timestamp)) {
           continue;
         }
 
@@ -725,11 +533,6 @@ struct GPMFParser::impl {
           continue;
         }
 
-        if (exclude(timestamp)) {
-          ++ind;
-          continue;
-        }
-
         proj_->Forward(lla.x(), lla.y(), lla.z(), prev_coord.x(),
                        prev_coord.y(), z);
         prev_timestamp = timestamp;
@@ -743,11 +546,6 @@ struct GPMFParser::impl {
 
     while (ind < lla_.size()) {
       if (gps_fix_[ind] != 3.0) {
-        ++ind;
-        continue;
-      }
-
-      if (exclude(gps_timestamps_[ind])) {
         ++ind;
         continue;
       }
@@ -772,34 +570,18 @@ struct GPMFParser::impl {
 
     track_length_ += current_length;
 
-    fmt::print(
-        "\e[38;2;154;205;50mGPS track length: \e[0m"
-        "\e[38;2;255;127;80m{:.3f}\e[0m\e[38;2;154;205;50m kilometers\e[0m\n",
-        1.0e-3 * current_length);
-  }
-
-  void create_bag(const std::string_view name) {
-    if (not set_.save_bag_) {
-      return;
-    }
-
-    if (std::filesystem::exists(name.data())) {
-      std::filesystem::remove_all(name.data());
-    }
-
-    rosbag2_storage::StorageOptions storage_options;
-    storage_options.uri = name.data();
-    writer_.open(storage_options);
+    print(LogEntry::Severity::Info,
+          fmt::format("GPS track length: {:.3f} kilometers\n",
+                      1.0e-3 * current_length));
   }
 
   void write_geojson(const std::string_view name, const std::string_view path) {
-    if (not set_.save_geojson_) {
-      return;
-    }
 
     nlohmann::json j{};
     j["type"] = "FeatureCollection";
     j["name"] = name.data();
+    j["crs"]["type"] = "name";
+    j["crs"]["properties"]["name"] = "urn:ogc:def:crs:OGC:1.3:CRS84";
 
     nlohmann::json gps_track{};
     gps_track["type"] = "Feature";
@@ -810,10 +592,6 @@ struct GPMFParser::impl {
       auto &&[gps, timestamp, fix] = val;
 
       if (fix != 3.0) {
-        continue;
-      }
-
-      if (exclude(timestamp)) {
         continue;
       }
 
@@ -832,37 +610,33 @@ struct GPMFParser::impl {
 
     std::ofstream f{path.data()};
     f << j.dump(4);
+
+    print(LogEntry::Severity::Info,
+          fmt::format("GeoJson written to {}", path.data()));
   }
 
-  bool exclude(int64_t timestamp) {
-    if (gps_exclusion_intervals_.empty()) {
-      return false;
+  void print(LogEntry::Severity severity, const std::string_view msg) {
+    if (set_.log_callback_) {
+      set_.log_callback_(severity, msg);
     }
+  }
 
-    for (auto &&[start, end] : gps_exclusion_intervals_) {
-      if (timestamp >= start and timestamp <= end) {
-        return true;
-      }
+  void on_end() {
+    print(LogEntry::Severity::Info, "Done");
+    if (set_.end_callback_) {
+      set_.end_callback_();
     }
-
-    return false;
   }
 
   GPMFParserSettings set_;
-  rosbag2_cpp::Writer writer_;
   std::vector<std::unique_ptr<GPMFChunkBase>> chunks_;
-  int64_t start_time_;
-  int64_t end_time_;
   std::vector<Eigen::Vector3d> lla_;
   std::vector<double> gps_fix_;
   std::vector<int64_t> gps_timestamps_;
   std::vector<Record> records_;
-  std::optional<GeographicLib::LocalCartesian> proj_;
   double track_length_{0.0};
   float track_duration_{0.0f};
-  std::unordered_map<size_t, std::vector<std::pair<int64_t, int64_t>>>
-      exclusion_intervals_map_;
-  std::vector<std::pair<int64_t, int64_t>> gps_exclusion_intervals_;
+  std::optional<GeographicLib::LocalCartesian> proj_;
 };
 
 GPMFParser::GPMFParser(const GPMFParserSettings &set)

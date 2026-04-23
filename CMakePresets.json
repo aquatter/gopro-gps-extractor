@@ -8,15 +8,32 @@
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
         "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_C_COMPILER": "cl",
         "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "vcpkg-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_BUILD_TYPE": "Release"
       }
     }
   ],
   "buildPresets": [
     {
       "name": "debug",
-      "configuration": "debug",
+      "configuration": "Debug",
       "configurePreset": "vcpkg-debug"
+    },
+    {
+      "name": "release",
+      "configuration": "Release",
+      "configurePreset": "vcpkg-release"
     }
   ]
 }

@@ -48,8 +48,6 @@ void SHUTChunk::reset() {
   data_.clear();
 }
 
-void SHUTChunk::open_mp4(const std::string_view path_to_mp4) {}
-
 IMUChunk::IMUChunk() {
   corr_matx_ = Eigen::Matrix4d::Zero();
   corr_matx_(0, 1) = -1.0;
@@ -65,11 +63,11 @@ void IMUChunk::add(const std::string_view fourcc_str, uint64_t timestamp,
 
   Data d{};
   d.timestamp_ = timestamp * 1'000;
-  const auto num_elements{vec.size() / num_components_};
+  const uint64_t num_elements{vec.size() / num_components_};
 
   d.val_.resize(num_elements);
 
-  for (auto &&i : ints(0ul, num_elements)) {
+  for (auto &&i : ints(0ull, num_elements)) {
     d.val_[i].x() = vec[i * num_components_];
     d.val_[i].y() = vec[i * num_components_ + 1];
     d.val_[i].z() = vec[i * num_components_ + 2];
@@ -93,7 +91,7 @@ IMUChunk::create_measurements(const std::string_view four_cc) const {
   std::vector<Measurement> measurements{};
   measurements.reserve(total_num);
 
-  for (auto &&i : ints(0ul, data.size() - 1)) {
+  for (auto &&i : ints(0ull, static_cast<uint64_t>(data.size() - 1))) {
 
     const int64_t delta{data[i + 1].timestamp_ - data[i].timestamp_};
 
@@ -196,24 +194,20 @@ void IMUChunk::reset() {
   gyro_data_.clear();
 }
 
-GPSChunk::GPSChunk(
-    std::span<const std::pair<int64_t, int64_t>> exclusion_intervals)
-    : exclusion_intervals_{exclusion_intervals.begin(),
-                           exclusion_intervals.end()} {}
-
 void GPSChunk::add(const std::string_view, uint64_t timestamp,
                    std::span<const double> vec) {
 
   Data d{};
   d.timestamp_ = timestamp * 1'000;
-  const auto num_elements{vec.size() / num_components_};
+  const uint64_t num_elements{vec.size() / num_components_};
 
   d.lla_.resize(num_elements);
   d.vel2d_.resize(num_elements);
   d.vel3d_.resize(num_elements);
+  d.dop_.resize(num_elements);
   d.fix_.resize(num_elements);
 
-  for (auto &&i : ints(0ul, num_elements)) {
+  for (auto &&i : ints(0ull, num_elements)) {
     d.lla_[i].x() = vec[i * num_components_];
     d.lla_[i].y() = vec[i * num_components_ + 1];
     d.lla_[i].z() = vec[i * num_components_ + 2];
@@ -271,12 +265,8 @@ void GPSChunk::create_measurements() {
   }
 }
 
-bool GPSChunk::exclude(int64_t timestamp) const noexcept {
-  for (auto &&[start, end] : exclusion_intervals_) {
-    if (timestamp >= start and timestamp <= end) {
-      return true;
-    }
-  }
-
-  return false;
+void GPSChunk::reset() {
+  index_ = 0;
+  measurements_.clear();
+  data_.clear();
 }

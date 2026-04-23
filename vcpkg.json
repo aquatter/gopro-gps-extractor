@@ -16,6 +16,7 @@
     "nlohmann-json",
     "range-v3",
     "tinyxml2",
-    "boost-algorithm"
+    "boost-algorithm",
+    "geographiclib"
   ]
 }

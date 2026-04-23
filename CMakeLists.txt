@@ -1,20 +1,22 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(gopro_gps_extractor LANGUAGES CXX)
+project(gopro_gps_extractor LANGUAGES CXX C)
 
 find_package(fmt CONFIG REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
-find_package(glfw3 CONFIG REQUIRED)
 find_package(range-v3 CONFIG REQUIRED)
-find_package(ng-log CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(tinyxml2 CONFIG REQUIRED)
+find_package(boost REQUIRED COMPONENTS algorithm)
+find_package(GeographicLib CONFIG REQUIRED)
 
 add_executable(gopro_gps_extractor 
     main.cpp
-    src/progress_bar.cpp
     src/gpmf_parser.cpp
     src/gpmf_frame.cpp
+    src/d3dwindow.cpp
+    src/d3ddevice.cpp
+    src/imgui_window.cpp
     gpmf-parser/demo/GPMF_mp4reader.c
     gpmf-parser/demo/GPMF_print.c
     gpmf-parser/GPMF_parser.c
@@ -37,10 +39,11 @@ target_link_libraries(gopro_gps_extractor PRIVATE
     fmt::fmt
     imgui::imgui
     Eigen3::Eigen
-    glfw
     range-v3::range-v3
-    ng-log::ng-log    
     tinyxml2::tinyxml2
     d3d11.lib
     nlohmann_json::nlohmann_json
+    Boost::boost
+    Boost::headers
+    ${GeographicLib_LIBRARIES}
 )
